@@ -115,9 +115,18 @@ whose fetch fails keeps its last events.
 ### Daemons
 
 Linux: `systemctl` state for bitcoind, electrs, nginx and tor, and
-bitcoind's block height via `bitcoin-cli`. macOS: `brew
-services` plus port checks for bitcoind and electrs. Every 20 seconds, local
-only.
+bitcoind's block height via `bitcoin-cli`. macOS shows the same rows, read
+from `launchctl list`: a job whose label ends in `.bitcoind`, `.electrs`,
+`.nginx` or `.tor` (Homebrew's `homebrew.mxcl.tor` or a hand-written agent
+alike). With no such job, bitcoind and electrs fall back to a check of their
+default ports. Every 20 seconds, local only.
+
+The block height comes from `bitcoin-cli getblockchaininfo` with its default
+datadir. When that fails, for example because the node's datadir is elsewhere
+and the CLI finds no cookie, udash asks bitcoind's REST interface
+(`http://127.0.0.1:8332/rest/chaininfo.json`, needs `rest=1`). On macOS the
+probes also search `/opt/homebrew/bin` and `/usr/local/bin`, which an app
+opened from Finder does not have on its `PATH`.
 
 ## Keys
 

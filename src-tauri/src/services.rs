@@ -1,12 +1,17 @@
 //! Daemon status for the chain and network cards, ported from pong.
 //!
-//! Linux reads the local node stack the way the shell's startup report does:
-//! `systemctl` state per unit and bitcoind's block height. (pong also
-//! checked openclaw's port; dropped 2026-10-24 as unused, which leaves the
-//! network card's third row free.) macOS has no systemd or local node, so it reads
-//! `brew services` plus TCP port checks, and the results fill the two cards
-//! in order. Every read is unprivileged and local-only; a probe that fails
-//! reads as unknown ("—"), so one dead daemon never blanks a card.
+//! Both cards show the same rows on every OS: BTCD, ELEC and BLOCK on the
+//! chain card, NGNX and TOR on the network card. (pong also checked
+//! openclaw's port; dropped 2026-10-24 as unused, which leaves the network
+//! card's third row free.)
+//!
+//! Linux reads `systemctl` state per unit. macOS reads `launchctl list`,
+//! which covers Homebrew services and hand-written launch agents alike, and
+//! falls back to a port check for a daemon with no launchd job. The block
+//! height comes from `bitcoin-cli`, or from bitcoind's REST interface when
+//! the CLI cannot reach the node. Every read is unprivileged and local-only;
+//! a probe that fails reads as unknown ("—"), so one dead daemon never blanks
+//! a card.
 
 use std::time::Duration;
 
@@ -15,11 +20,14 @@ use serde_json::Value;
 use tokio::process::Command;
 
 pub const REFRESH: Duration = Duration::from_secs(20);
-#[cfg_attr(target_os = "macos", allow(dead_code))]
 const TIMEOUT: Duration = Duration::from_secs(4);
 
 /// verificationprogress at or above this reads as synced.
 const BTC_SYNCED: f64 = 0.9999;
+
+/// bitcoind's REST chain info, on the default mainnet RPC port. Needs
+/// `rest=1`; it has no auth and answers on localhost only.
+const REST_CHAININFO: &str = "http://127.0.0.1:8332/rest/chaininfo.json";
 
 /// The value's colour, as a palette slot so it follows the theme.
 #[derive(Debug, Clone, Copy, Serialize, PartialEq)]
@@ -51,9 +59,6 @@ pub struct ServicesState {
 impl ServicesState {
     /// Before the first poll: captions with "—".
     pub fn starting() -> Self {
-        if cfg!(target_os = "macos") {
-            return ServicesState { chain: Vec::new(), net: Vec::new() };
-        }
         let dash = |c: &str| row(c, "—", Tone::Muted);
         ServicesState {
             chain: vec![dash("BTCD"), dash("ELEC"), dash("BLOCK")],
@@ -66,6 +71,7 @@ impl ServicesState {
 // Turning probe output into rows (pure, tested)
 
 /// systemd (ActiveState, SubState) -> row, as pong's _unit_state.
+#[cfg_attr(target_os = "macos", allow(dead_code))]
 fn unit_row(caption: &str, active: &str, sub: &str) -> Row {
     match active {
         "active" if sub == "running" => row(caption, "UP", Tone::Ok),
@@ -79,14 +85,59 @@ fn unit_row(caption: &str, active: &str, sub: &str) -> Row {
     }
 }
 
-/// A port probe: listening / not / unknown -> UP / DOWN / —. Used by the
-/// macOS backend.
+/// One line of `launchctl list`.
+#[derive(Debug, Clone, PartialEq)]
 #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn probe_row(caption: &str, up: Option<bool>) -> Row {
-    match up {
-        Some(true) => row(caption, "UP", Tone::Ok),
-        Some(false) => row(caption, "DOWN", Tone::Auburn),
-        None => row(caption, "—", Tone::Muted),
+struct Job {
+    label: String,
+    /// Set while the job is running.
+    pid: Option<u32>,
+    /// The last exit status; a negative number is the signal that ended it.
+    status: i32,
+}
+
+/// `launchctl list` output ("PID\tStatus\tLabel" lines) -> jobs.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn launchd_jobs(raw: &str) -> Vec<Job> {
+    raw.lines()
+        .filter_map(|line| {
+            let mut f = line.split('\t');
+            let (pid, status, label) = (f.next()?, f.next()?, f.next()?);
+            Some(Job {
+                label: label.trim().to_string(),
+                pid: pid.trim().parse().ok(),
+                status: status.trim().parse().ok()?,
+            })
+        })
+        .collect()
+}
+
+/// The job for a daemon: its label ends in `.<name>`, whoever wrote the
+/// plist (`homebrew.mxcl.tor`, `org.bitcoin.bitcoind`). A running match wins
+/// over a stopped one.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn find_job<'a>(jobs: &'a [Job], names: &[&str]) -> Option<&'a Job> {
+    let hits = || {
+        jobs.iter().filter(|j| {
+            names.iter().any(|n| j.label.rsplit('.').next() == Some(n) && j.label.contains('.'))
+        })
+    };
+    hits().find(|j| j.pid.is_some()).or_else(|| hits().next())
+}
+
+/// A launchd job (or, without one, a port check) -> row. A clean exit or
+/// SIGTERM reads as stopped on purpose; any other exit as a failure.
+#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+fn job_row(caption: &str, job: Option<&Job>, listening: Option<bool>) -> Row {
+    match job {
+        Some(Job { pid: Some(_), .. }) => row(caption, "UP", Tone::Ok),
+        Some(Job { status: 0 | -15, .. }) => row(caption, "OFF", Tone::Muted),
+        Some(_) => row(caption, "FAIL", Tone::Auburn),
+        None => match listening {
+            Some(true) => row(caption, "UP", Tone::Ok),
+            Some(false) => row(caption, "OFF", Tone::Muted),
+            None => row(caption, "—", Tone::Muted),
+        },
     }
 }
 
@@ -103,7 +154,8 @@ fn thousands(n: u64) -> String {
     out
 }
 
-/// `bitcoin-cli getblockchaininfo` output -> the BLOCK row.
+/// `getblockchaininfo` (CLI) or `chaininfo.json` (REST) -> the BLOCK row.
+/// Both carry `blocks` and `verificationprogress`.
 fn block_row(info: &str) -> Row {
     let parsed = serde_json::from_str::<Value>(info).ok().and_then(|v| {
         Some((v.get("blocks")?.as_u64()?, v.get("verificationprogress")?.as_f64()?))
@@ -123,11 +175,30 @@ fn block_row(info: &str) -> Row {
 
 /// Run a short local command; trimmed stdout, or "" on any failure.
 async fn probe(cmd: &str, args: &[&str], timeout: Duration) -> String {
-    let run = Command::new(cmd).args(args).kill_on_drop(true).output();
-    match tokio::time::timeout(timeout, run).await {
+    let mut command = Command::new(cmd);
+    command.args(args).kill_on_drop(true);
+    // An app opened from Finder gets PATH=/usr/bin:/bin:/usr/sbin:/sbin, with
+    // neither Homebrew nor /usr/local/bin, where bitcoin-cli usually lives.
+    #[cfg(target_os = "macos")]
+    {
+        let path = std::env::var("PATH").unwrap_or_default();
+        command.env("PATH", format!("{path}:/opt/homebrew/bin:/usr/local/bin"));
+    }
+    match tokio::time::timeout(timeout, command.output()).await {
         Ok(Ok(out)) => String::from_utf8_lossy(&out.stdout).trim().to_string(),
         _ => String::new(),
     }
+}
+
+/// Chain info for the BLOCK row: `bitcoin-cli` with its default datadir and
+/// cookie, else bitcoind's REST interface (for a node whose datadir is
+/// elsewhere, so the CLI finds no cookie).
+async fn chain_info() -> String {
+    let cli = probe("bitcoin-cli", &["getblockchaininfo"], TIMEOUT).await;
+    if !cli.is_empty() {
+        return cli;
+    }
+    probe("curl", &["-sf", "--max-time", "3", REST_CHAININFO], TIMEOUT).await
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -151,8 +222,7 @@ mod backend {
             unit(elec.0, elec.1),
             unit(ngnx.0, ngnx.1),
             unit(tor.0, tor.1),
-            // finds its cookie under the default datadir, as the shell does
-            probe("bitcoin-cli", &["getblockchaininfo"], TIMEOUT),
+            chain_info(),
         );
         ServicesState {
             chain: vec![btcd, elec, block_row(&info)],
@@ -165,67 +235,53 @@ mod backend {
 mod backend {
     use super::*;
 
-    const MAX_ROWS: usize = 6;
-    /// TCP port checks for daemons brew does not manage: (caption, ports);
-    /// a row reads UP if anything listens on any of them.
-    const PORTS: [(&str, &[u16]); 2] = [("BTCD", &[8332, 8333]), ("ELEC", &[50001])];
-    /// `brew services` starts Ruby: allow longer.
-    const BREW_TIMEOUT: Duration = Duration::from_secs(8);
+    /// (caption, launchd label suffixes, default ports). The ports are only
+    /// checked when no launchd job matches, e.g. bitcoind started by hand.
+    const DAEMONS: [(&str, &[&str], &[u16]); 4] = [
+        ("BTCD", &["bitcoind", "bitcoin"], &[8332, 8333]),
+        ("ELEC", &["electrs"], &[50001]),
+        ("NGNX", &["nginx"], &[]),
+        ("TOR", &["tor"], &[9050]),
+    ];
+
+    /// Anything listening on any of these ports; None with no ports to check.
+    async fn listening(ports: &[u16]) -> Option<bool> {
+        if ports.is_empty() {
+            return None;
+        }
+        for p in ports {
+            let spec = format!("-iTCP:{p}");
+            if !probe("lsof", &["-nP", &spec, "-sTCP:LISTEN"], TIMEOUT).await.is_empty() {
+                return Some(true);
+            }
+        }
+        Some(false)
+    }
+
+    async fn daemon(jobs: &[Job], (caption, names, ports): (&str, &[&str], &[u16])) -> Row {
+        let job = find_job(jobs, names);
+        let listening = if job.is_some() { None } else { listening(ports).await };
+        job_row(caption, job, listening)
+    }
 
     pub async fn fetch() -> ServicesState {
-        let raw = probe("brew", &["services", "list", "--json"], BREW_TIMEOUT).await;
-        let mut rows = brew_rows(&raw, MAX_ROWS - PORTS.len());
-        for (caption, ports) in PORTS {
-            let mut up = false;
-            for p in ports {
-                let spec = format!("-iTCP:{p}");
-                if !probe("lsof", &["-nP", &spec, "-sTCP:LISTEN"], TIMEOUT).await.is_empty() {
-                    up = true;
-                    break;
-                }
-            }
-            rows.push(probe_row(caption, Some(up)));
+        let (list, info) = tokio::join!(probe("launchctl", &["list"], TIMEOUT), chain_info());
+        let jobs = launchd_jobs(&list);
+        let [btcd, elec, ngnx, tor] = DAEMONS;
+        let (btcd, elec, ngnx, tor) = tokio::join!(
+            daemon(&jobs, btcd),
+            daemon(&jobs, elec),
+            daemon(&jobs, ngnx),
+            daemon(&jobs, tor),
+        );
+        ServicesState {
+            chain: vec![btcd, elec, block_row(&info)],
+            net: vec![ngnx, tor],
         }
-        let net = rows.split_off(rows.len().min(3));
-        ServicesState { chain: rows, net }
     }
 }
 
 pub use backend::fetch;
-
-/// `brew services list --json` -> rows, at most `cap`.
-#[cfg_attr(not(target_os = "macos"), allow(dead_code))]
-fn brew_rows(raw: &str, cap: usize) -> Vec<Row> {
-    let caption = |name: &str| -> String {
-        match name {
-            "tor" => "TOR",
-            "mysql" => "MYSQL",
-            "unbound" => "UNBND",
-            "yubikey-agent" => "YUBI",
-            "postgresql" => "PGSQL",
-            "redis" => "REDIS",
-            "nginx" => "NGNX",
-            "dnsmasq" => "DNSMQ",
-            _ => return name.chars().take(5).collect::<String>().to_uppercase(),
-        }
-        .to_string()
-    };
-    let list: Vec<Value> = serde_json::from_str(raw).unwrap_or_default();
-    list.iter()
-        .filter_map(|svc| {
-            let name = svc.get("name")?.as_str().filter(|n| !n.is_empty())?;
-            let status = svc.get("status").and_then(Value::as_str).unwrap_or("").to_lowercase();
-            let (active, sub) = match status.as_str() {
-                "started" => ("active", "running"),
-                "none" | "stopped" => ("inactive", ""),
-                "error" | "unknown" => ("failed", ""),
-                _ => ("unknown", ""),
-            };
-            Some(unit_row(&caption(name), active, sub))
-        })
-        .take(cap)
-        .collect()
-}
 
 // ---------------------------------------------------------------------------
 
@@ -234,7 +290,8 @@ mod tests {
     use super::*;
 
     const BLOCKCHAININFO: &str = include_str!("../tests/fixtures/bitcoin-getblockchaininfo.json");
-    const BREW: &str = include_str!("../tests/fixtures/brew-services.json");
+    const REST_CHAININFO: &str = include_str!("../tests/fixtures/bitcoin-rest-chaininfo.json");
+    const LAUNCHCTL: &str = include_str!("../tests/fixtures/launchctl-list.txt");
 
     #[test]
     fn unit_states() {
@@ -258,24 +315,46 @@ mod tests {
     }
 
     #[test]
-    fn port_probe() {
-        assert_eq!(probe_row("ELEC", Some(true)), row("ELEC", "UP", Tone::Ok));
-        assert_eq!(probe_row("ELEC", Some(false)), row("ELEC", "DOWN", Tone::Auburn));
-        assert_eq!(probe_row("ELEC", None), row("ELEC", "—", Tone::Muted));
+    fn block_height_from_rest() {
+        // REST gives a synced node's progress as a bare 1
+        assert_eq!(block_row(REST_CHAININFO), row("BLOCK", "932,150", Tone::Ok));
     }
 
     #[test]
-    fn brew_services() {
-        let rows = brew_rows(BREW, 4);
+    fn launchd_list() {
+        let jobs = launchd_jobs(LAUNCHCTL);
+        assert_eq!(jobs.len(), 7, "header line skipped");
         assert_eq!(
-            rows,
-            vec![
-                row("TOR", "UP", Tone::Ok),
-                row("PGSQL", "OFF", Tone::Muted),
-                row("UNBND", "FAIL", Tone::Auburn),
-                row("SYNCT", "OFF", Tone::Muted),
-            ]
+            find_job(&jobs, &["bitcoind"]),
+            Some(&Job { label: "org.example.bitcoind".into(), pid: Some(4101), status: 0 })
         );
-        assert!(brew_rows("not json", 4).is_empty());
+        // a running match wins over a stopped one
+        assert_eq!(find_job(&jobs, &["tor"]).unwrap().pid, Some(816));
+        // the whole last label segment must match: "monitor" ends in "tor"
+        // but is not tor
+        assert!(find_job(&jobs, &["itor"]).is_none());
+        assert!(find_job(&jobs, &["nginx"]).is_none());
+    }
+
+    #[test]
+    fn launchd_rows() {
+        let jobs = launchd_jobs(LAUNCHCTL);
+        let r = |names: &[&str], listening| job_row("X", find_job(&jobs, names), listening);
+        assert_eq!(r(&["bitcoind"], None), row("X", "UP", Tone::Ok));
+        assert_eq!(r(&["electrs"], None), row("X", "OFF", Tone::Muted)); // SIGTERM
+        assert_eq!(r(&["unbound"], None), row("X", "FAIL", Tone::Auburn));
+        assert_eq!(r(&["mysql"], None), row("X", "OFF", Tone::Muted));
+        // no job: the port check decides
+        assert_eq!(r(&["nginx"], Some(true)), row("X", "UP", Tone::Ok));
+        assert_eq!(r(&["nginx"], Some(false)), row("X", "OFF", Tone::Muted));
+        assert_eq!(r(&["nginx"], None), row("X", "—", Tone::Muted));
+    }
+
+    #[test]
+    fn starting_rows_match_both_cards() {
+        let s = ServicesState::starting();
+        let caps = |rows: &[Row]| rows.iter().map(|r| r.caption.clone()).collect::<Vec<_>>();
+        assert_eq!(caps(&s.chain), ["BTCD", "ELEC", "BLOCK"]);
+        assert_eq!(caps(&s.net), ["NGNX", "TOR"]);
     }
 }

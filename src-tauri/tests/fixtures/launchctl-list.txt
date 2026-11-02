@@ -1,0 +1,8 @@
+PID	Status	Label
+-	0	homebrew.mxcl.mysql
+4101	0	org.example.bitcoind
+-	-15	org.example.electrs
+-	0	org.example.tor
+816	0	homebrew.mxcl.tor
+-	1	homebrew.mxcl.unbound
+977	0	org.example.monitor

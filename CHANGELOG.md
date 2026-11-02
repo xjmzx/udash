@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+- macOS: the chain and network cards show the same rows as on Linux (BTCD,
+  ELEC, BLOCK · NGNX, TOR), read from `launchctl list` instead of listing
+  every `brew` service. A daemon with no launchd job falls back to a port
+  check.
+- BLOCK falls back to bitcoind's REST interface (`/rest/chaininfo.json`,
+  `rest=1`) when `bitcoin-cli` cannot reach the node, on every OS.
+- macOS: the daemon probes find `bitcoin-cli` in `/opt/homebrew/bin` and
+  `/usr/local/bin` when udash is opened from Finder.
+
 ## 0.2.0 — 2026-10-28
 
 - Renamed **ding → udash**: binary, package, `.desktop`, icon, config and

@@ -1,7 +1,0 @@
-[
-  { "name": "tor", "service_name": "homebrew.mxcl.tor", "running": true, "loaded": true, "schedulable": false, "pid": 4242, "exit_code": 0, "user": "someone", "status": "started", "file": "/opt/homebrew/opt/tor/homebrew.mxcl.tor.plist" },
-  { "name": "postgresql", "service_name": "homebrew.mxcl.postgresql", "running": false, "loaded": false, "schedulable": false, "pid": null, "exit_code": null, "user": null, "status": "none", "file": "/opt/homebrew/opt/postgresql/homebrew.mxcl.postgresql.plist" },
-  { "name": "unbound", "service_name": "homebrew.mxcl.unbound", "running": false, "loaded": true, "schedulable": false, "pid": null, "exit_code": 1, "user": "someone", "status": "error", "file": "/opt/homebrew/opt/unbound/homebrew.mxcl.unbound.plist" },
-  { "name": "syncthing", "service_name": "homebrew.mxcl.syncthing", "running": false, "loaded": false, "schedulable": false, "pid": null, "exit_code": null, "user": null, "status": "stopped", "file": "/opt/homebrew/opt/syncthing/homebrew.mxcl.syncthing.plist" },
-  { "name": "redis", "service_name": "homebrew.mxcl.redis", "running": true, "loaded": true, "schedulable": false, "pid": 777, "exit_code": 0, "user": "someone", "status": "started", "file": "/opt/homebrew/opt/redis/homebrew.mxcl.redis.plist" }
-]
