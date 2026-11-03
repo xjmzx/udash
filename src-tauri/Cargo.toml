@@ -1,6 +1,6 @@
 [package]
 name = "udash"
-version = "0.2.0"
+version = "0.2.1"
 description = "Daemon, weather and calendar dashboard"
 authors = ["xjmzx"]
 edition = "2021"

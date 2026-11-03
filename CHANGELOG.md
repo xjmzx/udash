@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.1 — 2026-11-04
 
 - Release workflow: a `v*` tag now also builds a macOS arm64 `.dmg` and
   appends it to the release the Linux job publishes. The Linux job still owns
