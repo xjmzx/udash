@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Release workflow: a `v*` tag now also builds a macOS arm64 `.dmg` and
+  appends it to the release the Linux job publishes. The Linux job still owns
+  the release notes. No Windows job yet.
 - macOS: the chain and network cards show the same rows as on Linux (BTCD,
   ELEC, BLOCK · NGNX, TOR), read from `launchctl list` instead of listing
   every `brew` service. A daemon with no launchd job falls back to a port

@@ -31,8 +31,8 @@ make deb        # Linux: a .deb for another machine
 ### Releases
 
 [`.github/workflows/release.yml`](.github/workflows/release.yml) builds a
-`.deb` for Linux x86_64 and publishes it on a GitHub Release when a `v*` tag
-is pushed (a tag with a hyphen, like `v0.2.0-beta.1`, is a pre-release). It
+`.deb` for Linux x86_64 and a `.dmg` for macOS arm64, and publishes them on a
+GitHub Release when a `v*` tag is pushed (a tag with a hyphen, like `v0.2.0-beta.1`, is a pre-release). It
 runs the Rust tests first. Set the version in all five files, commit, then
 tag:
 
@@ -42,8 +42,12 @@ git commit -am "release: v0.1.1"
 git tag v0.1.1 && git push origin main v0.1.1
 ```
 
-It can also be run by hand from the Actions tab, naming an existing tag.
-macOS and Windows builds are not in the workflow yet.
+It can also be run by hand from the Actions tab, naming an existing tag. The
+Linux job creates the release and owns its notes; the macOS job appends its
+`.dmg` to it. There is no Windows job — whether Windows is wanted is still
+open. The `.dmg` is unsigned and un-notarised, like the rest of the suite, so
+Gatekeeper refuses its first launch until the app is opened from the context
+menu or cleared with `xattr -dr com.apple.quarantine /Applications/udash.app`.
 
 Debug builds keep their config and cache in `udash-dev` folders, so a dev run
 never touches the installed app's state.

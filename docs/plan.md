@@ -126,9 +126,12 @@ Rust core with GTK4 + SwiftUI shells (about twice the UI work).
    file, Open-Meteo JSON, `systemctl` output).
 3. **Match the dashboard** — every card, the layout and both themes, checked
    side by side against `pong --dashboard`.
-4. **Ship** — tag-triggered release for Linux `.deb`, macOS `.dmg`, Windows.
+4. **Ship** — tag-triggered release for Linux `.deb` and macOS `.dmg`;
+   Windows still open.
    The `.deb` job is in place (2026-10-24, modelled on dstack's
-   `release.yml`); macOS and Windows jobs follow nping's.
+   `release.yml`) and the macOS `.dmg` job beside it (2026-11-04, in nping's
+   shape: it `needs` the Linux job, which owns the release notes, and only
+   appends its asset). A Windows job would follow the same shape.
    Then point pong's README at ding; pong stays private as an archive.
 5. **macOS** — the dashboard comes with step 3. Daemon checks done
    2026-11-03: the cards show the same rows as Linux, from `launchctl list`
@@ -136,8 +139,9 @@ Rust core with GTK4 + SwiftUI shells (about twice the UI work).
    Homebrew services and hand-written agents both count), port checks when
    no job matches, and the block height from bitcoind's REST interface when
    `bitcoin-cli` finds no cookie. The probes add Homebrew's bin folders to
-   `PATH`, since a Finder-launched app has neither. Still open: fonts (Ubuntu
-   and DejaVu are not on macOS) and a `.dmg` job in the release workflow.
+   `PATH`, since a Finder-launched app has neither. The `.dmg` job landed
+   2026-11-04 (step 4). Still open: fonts — Ubuntu and DejaVu are not on
+   macOS, so labels and event chips fall back.
 
 ## Later: ding-lock
 
