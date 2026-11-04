@@ -1,18 +1,19 @@
-# ding — plan
+# udash — plan
 
 **Status:** plan only — nothing built. Written 2026-10-24.
 
-**ding** replaces **pong** (`xjmzx/pong`, Python + pygame, v0.5.0) as a fresh
-repo and a separate app bundle. The name: *d* for daemons — the dashboard's
-job is checking them — and *ding* like a notification sound. Variants, when
-there are more than one, are **ding-dash** and **ding-lock**.
+**udash** replaces **pong** (`xjmzx/pong`, Python + pygame, v0.5.0) as a fresh
+repo and a separate app bundle. It was first called **ding**; renamed to
+**udash** in 0.2.0 because Ubuntu's own `ding` package (a dictionary) took
+over the .deb on an apt upgrade. Variants, when there are more than one, are
+the dashboard (**udash**) and **udash-lock**.
 
 ## Scope
 
-**Now: the dashboard only (ding-dash).** Same cards, same layout, same theme
+**Now: the dashboard only.** Same cards, same layout, same theme
 switching as `pong --dashboard`. The one thing dropped is the Pong animation.
 
-**Later: the lock (ding-lock).** A deterrent, as pong's is: one fullscreen
+**Later: the lock (udash-lock).** A deterrent, as pong's is: one fullscreen
 window per monitor so the GNOME top bar is covered, our own password field
 checked through PAM. Not a true lock — on GNOME/Wayland only the compositor
 can lock the session (see pong's `docs/proposals/wayland-true-lock.md`).
@@ -54,7 +55,7 @@ Rust core with GTK4 + SwiftUI shells (about twice the UI work).
     face, `UBUNTU_STACK`; on 26.04 "ubuntu" resolves to it, not to Ubuntu
     Sans, though both are installed);
   - the clock, card values and date numerals — **Google Sans Flex Bold**,
-    the static `GoogleSansFlex-Bold-Static.ttf` pong loads. ding bundles
+    the static `GoogleSansFlex-Bold-Static.ttf` pong loads. udash bundles
     that exact file (`src/assets/fonts/`, SIL OFL 1.1, licence alongside),
     so it matches pong and the Mac build has it. The face raises the colon
     only when it sits between digits, so the clock must stay one run of
@@ -70,7 +71,7 @@ Rust core with GTK4 + SwiftUI shells (about twice the UI work).
 ## Dropped
 
 - **openclaw** (2026-10-24): not used. pong's network card checked its
-  port (the CLAW row); ding does not. The card keeps its three-row shape,
+  port (the CLAW row); udash does not. The card keeps its three-row shape,
   so its third row is free for another daemon later.
 
 ## The paddles
@@ -103,7 +104,7 @@ Rust core with GTK4 + SwiftUI shells (about twice the UI work).
 
 | Rust module | Ported from `pong_lock.py` |
 |---|---|
-| `config.rs` | The three config files, in each OS's config folder (`ding`). Debug builds use `-dev` folders. On first run, read pong's config folder once so calendar URLs and cities carry over. |
+| `config.rs` | The three config files, in each OS's config folder (`udash`). Debug builds use `-dev` folders. On first run, read pong's config folder once so calendar URLs and cities carry over. |
 | `weather.rs` | Open-Meteo forecast + air quality, geocode cache, the 162 bundled cities. One shared HTTP client. |
 | `calendar.rs` | ICS fetch, recurring events, 7-day lookahead, Google colour names. |
 | `services.rs` | `systemctl`, port probes, bitcoind block height on Linux; `brew services` on macOS. |
@@ -111,7 +112,7 @@ Rust core with GTK4 + SwiftUI shells (about twice the UI work).
 
 - Each data source runs on its own timer and pushes updates to the window as
   events. On open, the window asks for the current state once.
-- `ding --list-cities` is handled before Tauri starts, as in pong.
+- `udash --list-cities` is handled before Tauri starts, as in pong.
 - Single-instance plugin; Esc/Q quit, as in pong's dashboard.
 
 **Frontend:** CSS grid for the lattice, one component per card, themes as
@@ -132,7 +133,7 @@ Rust core with GTK4 + SwiftUI shells (about twice the UI work).
    `release.yml`) and the macOS `.dmg` job beside it (2026-11-04, in nping's
    shape: it `needs` the Linux job, which owns the release notes, and only
    appends its asset). A Windows job would follow the same shape.
-   Then point pong's README at ding; pong stays private as an archive.
+   Then point pong's README at udash; pong stays private as an archive.
 5. **macOS** — the dashboard comes with step 3. Daemon checks done
    2026-11-03: the cards show the same rows as Linux, from `launchctl list`
    (any job labelled `….bitcoind`, `….electrs`, `….nginx`, `….tor`, so
@@ -143,11 +144,48 @@ Rust core with GTK4 + SwiftUI shells (about twice the UI work).
    2026-11-04 (step 4). Still open: fonts — Ubuntu and DejaVu are not on
    macOS, so labels and event chips fall back.
 
-## Later: ding-lock
+## Next minor release (v0.2): ideas
+
+Noted 2026-10-24. Not started.
+
+1. **Sounds, with a mute button.**
+   - A chime ("ding") on the hour; a different sound when a calendar event
+     is coming up (lead time to settle, ~10 min to start; timed events
+     only, once per occurrence).
+   - A mute button on the dashboard, its state remembered across launches
+     (cache folder).
+   - **Play from Rust, not the webview.** WebKitGTK refuses a page's
+     `play()` on a timer unless there was a recent click, and pins an
+     element's volume near 0.1 (hit in nchat; see the suite notes). A
+     timed chime is exactly that case. nwave already plays audio from Rust
+     (rodio); the same route works here and keeps timing off the page.
+   - Sound files are bundled, so they must be licence-clean for a public
+     repo: made for udash, or CC0. Short, and padded with a little leading
+     silence in case a Bluetooth sink is waking up.
+   - Optional: the hour chime lands with the hour's paddle hop.
+2. **Mullvad as a service check.** `mullvad-daemon` is a systemd unit like
+   the others, and `mullvad status` reports Connected / Disconnected /
+   Connecting. It fits the network card's free third row. Show the state
+   only, not the relay name (which gives away a location). `mullvad
+   status` exists on macOS too.
+
+## Future direction: for other users
+
+- **Subscribing to a calendar in the app.** Add, recolour and remove
+  calendars (name, secret ICS URL, colour) from the UI rather than by
+  editing `calendars.json`; the app writes the file (0600) and never shows
+  a stored URL in full. `wash_priority` set the same way.
+- **Configurable services.** Move the hard-coded units and port checks
+  (BTCD / ELEC / NGNX / TOR on Linux, brew and port probes on macOS) into a
+  `services.json` whose default matches today's cards, then give it a UI.
+  Three rows per card is the layout's limit.
+- A first run that makes sense without pong's config to import.
+
+## Later: udash-lock
 
 Kept from the rebuild plan, for when the lock comes back.
 
-- `ding-lock` (or `ding --lock`): one undecorated, always-on-top window per
+- `udash-lock` (or `udash --lock`): one undecorated, always-on-top window per
   monitor, each sent fullscreen onto its own monitor through GTK's
   `fullscreen_on_monitor` (Wayland does not let a client place windows).
   A true fullscreen window should cover the top bar.
