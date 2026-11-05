@@ -121,7 +121,7 @@ jobs:
     needs: build-linux-x86_64
     # arm64. The suite's Macs are Apple silicon, and an Intel .dmg would need
     # its own job rather than a universal build — nothing here asks for one.
-    runs-on: macos-14
+    runs-on: macos-15
     steps:
       - uses: actions/checkout@v6
         with:
